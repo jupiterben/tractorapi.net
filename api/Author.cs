@@ -16,15 +16,13 @@ namespace tractor.api.author
     }
 
     // Raised if an attribute must be defined when emitting an element.
-    public class RequiredValueError
-        : AuthorError
+    public class RequiredValueError : AuthorError
     {
         public RequiredValueError(string msg) : base(msg) { }
     }
 
     // Raised when attempting to add a task to multiple parent tasks.
-    public class ParentExistsError
-        : AuthorError
+    public class ParentExistsError : AuthorError
     {
         public ParentExistsError(string msg) : base(msg) { }
     }
@@ -62,7 +60,6 @@ namespace tractor.api.author
             return s.Split();
         }
     }
-
     // The Attribute class presents a way to define the nature of
     //     attributes of job Elements, such as whether or not they are
     //     required and how valid values are determined.
@@ -162,8 +159,7 @@ namespace tractor.api.author
     }
 
     // A FloatAttribute is a float value associated with an attribute name.
-    public class FloatAttribute
-        : Attribute
+    public class FloatAttribute : Attribute
     {
         int precision;
         public FloatAttribute(string name, int precision = 1)
@@ -219,8 +215,7 @@ namespace tractor.api.author
     // A DateAttribute is a datetime value associated with an
     //     attribute name.
     //     
-    public class DateAttribute
-        : Attribute
+    public class DateAttribute : Attribute
     {
         public DateAttribute(string name) : base(name) { }
         // Set the value only if one of datetime type is specified.
@@ -255,8 +250,7 @@ namespace tractor.api.author
     // A StringAttribute is a string value associated with an
     //     attribute name.
     //     
-    public class StringAttribute
-        : Attribute
+    public class StringAttribute : Attribute
     {
         public StringAttribute(string msg, string alias = null, bool required = false, bool suppressTclKey = false)
             : base(msg, alias, required, suppressTclKey) { }
@@ -271,8 +265,7 @@ namespace tractor.api.author
     //     postscript command attribute name.  It can be one of
     //     "done", "error", or "always".
     //     
-    public class WhenStringAttribute
-        : StringAttribute
+    public class WhenStringAttribute : StringAttribute
     {
         public WhenStringAttribute(string name) : base(name) { }
         static List<string> validList = new List<string>() { "done", "error", "always" };
@@ -286,8 +279,7 @@ namespace tractor.api.author
     // A StringListAttribute is a list of string values associated with an
     //     attribute name.
     //     
-    public class StringListAttribute
-        : Attribute
+    public class StringListAttribute : Attribute
     {
         public StringListAttribute(string name, string alias = null, bool required = false, bool suppressTclKey = false)
             : base(name, alias, required, suppressTclKey) { }
@@ -320,17 +312,16 @@ namespace tractor.api.author
             foreach (var value in this.value as List<string>)
             {
                 var val = value.ToString().Replace("\\", "\\\\");
-                args.Add(String.Format("{%s}", val));
+                args.Add(String.Format("{0}", val));
             }
-            return String.Format("%s {%s}", this.tclKey(), string.Join(" ", args));
+            return String.Format("{0} {{1}}", this.tclKey(), string.Join(" ", args));
         }
     }
 
     // An IntListAttribute is a list of integer values associated with an
     //     attribute name.
     //     
-    public class IntListAttribute
-        : Attribute
+    public class IntListAttribute : Attribute
     {
         public IntListAttribute(string name) : base(name) { }
         // Return True if the value is a list of integers.
@@ -364,8 +355,7 @@ namespace tractor.api.author
     // An ArgvAttribute is a list of string values associated with an
     //     attribute name.
     //     
-    public class ArgvAttribute
-        : StringListAttribute
+    public class ArgvAttribute : StringListAttribute
     {
         public ArgvAttribute(string name, string alias = null, bool required = false, bool suppressTclKey = false)
             : base(name, alias, required, suppressTclKey) { }
@@ -393,7 +383,7 @@ namespace tractor.api.author
         public override bool isValid(object value)
         {
             // values of True and False will pass as well
-            return new List<object> { 0, 1 }.Contains(value);
+            return new List<object> { 0, 1, true, false }.Contains(value);
         }
 
         // Return the Tcl representation of the attribute name and value.
@@ -484,7 +474,7 @@ namespace tractor.api.author
     {
         public List<Attribute> attributes;
         public Dictionary<string, Attribute> attributeByName;
-        public KeyValueElement(List<Attribute> attributes, Hashtable kw)
+        public KeyValueElement(List<Attribute> attributes, Dictionary<string, object> kw = null)
         {
             // lookup of attribute by name required for __getattr__ and __setattr__
             this.attributes = attributes;
@@ -498,9 +488,12 @@ namespace tractor.api.author
                 }
             }
             // initialize attributes passes as keyword parameters
-            foreach (string key in kw.Keys)
+            if (kw != null)
             {
-                setattr(key, kw[key]);
+                foreach (string key in kw.Keys)
+                {
+                    setattr(key, kw[key]);
+                }
             }
         }
 
@@ -590,7 +583,7 @@ namespace tractor.api.author
             {
                 // this task already has a parent, so replace with an Instance
                 var title = element.getattr("title") as string;
-                var instance = new Instance(new Hashtable() { { "title", title } });
+                var instance = new Instance(new Dictionary<string, object>() { { "title", title } });
                 (self.attributeByName["subtasks"] as GroupAttribute).addElement(instance);
             }
             else if (element.parent != null)
@@ -607,7 +600,7 @@ namespace tractor.api.author
         // Instantiate a new Task element, add to subtask list, and return
         //         element.
         //         
-        public static Task newTask(this KeyValueElement self, Hashtable kw, string argv = null)
+        public static Task newTask(this KeyValueElement self, Dictionary<string, object> kw, string argv = null)
         {
             var task = new Task(kw, argv);
             addChild(self, task);
@@ -677,9 +670,9 @@ namespace tractor.api.author
         // Instantiate a new Command element, adds to cleanup command
         //         list, and returns element.
         //         
-        public static object newCleanup(this KeyValueElement item, Hashtable kw)
+        public static object newCleanup(this KeyValueElement item, Dictionary<string, object> kw = null, object argv = null)
         {
-            var command = new Command(kw);
+            var command = new Command(kw, argv);
             addCleanup(item, command);
             return command;
         }
@@ -705,22 +698,23 @@ namespace tractor.api.author
         // Instantiate a new Command element, add to postscript command list,
         //         and return element.
         //         
-        //         public static Command newPostscript(this Ipo params object[] kw)
-        //         {
-        //             var command = Command(kw);
-        //             this.addPostscript(command);
-        //             return command;
-        //         }
-        // 
-        //         // Add an existing postscript command to element.
-        //         public virtual object addPostscript(object command)
-        //         {
-        //             if (!(command is Command))
-        //             {
-        //                 throw TypeError(String.Format("%s is not an instance of Command", command.ToString()));
-        //             }
-        //             this.attributeByName["postscript"].addElement(command);
-        //         }
+        public static Command newPostscript(this KeyValueElement self, Dictionary<string, object> kw = null, object argv = null)
+        {
+            var command = new Command(kw, argv);
+            addPostscript(self, command);
+            return command;
+        }
+
+        // Add an existing postscript command to element.
+        public static void addPostscript(this KeyValueElement self, Command command)
+        {
+            if (!(command is Command))
+            {
+                throw new TypeError(String.Format("{0} is not an instance of Command", command.ToString()));
+            }
+            var posts = self.attributeByName["postscript"] as GroupAttribute;
+            posts.addElement(command);
+        }
     }
 
     // A Job element defines the attributes of a job and contains
@@ -729,7 +723,133 @@ namespace tractor.api.author
     //     
     public class Job : KeyValueElement, ISubtaskMixin, ICleanupMixin, IPostscriptMixin
     {
-        public Job(Hashtable kw) : base(Attributes(), kw)
+        public string title
+        {
+            get { return this.getattr("title") as string; }
+            set { this.setattr("title", value); }
+        }
+        public string tier
+        {
+            get { return this.getattr("tier") as string; }
+            set { this.setattr("tier", value); }
+        }
+        public string spoolcwd
+        {
+            get { return this.getattr("spoolcwd") as string; }
+            set { this.setattr("spoolcwd", value); }
+        }
+        public List<string> projects
+        {
+            get { return this.getattr("projects") as List<string>; }
+            set { this.setattr("projects", value); }
+        }
+        public List<string> crews
+        {
+            get { return this.getattr("crews") as List<string>; }
+            set { this.setattr("crews", value); }
+        }
+        public int? maxactive
+        {
+            get { return this.getattr("maxactive") as int?; }
+            set { this.setattr("maxactive", value); }
+        }
+        public bool paused
+        {
+            get { return true == this.getattr("paused") as bool?; }
+            set { this.setattr("paused", value); }
+        }
+        public DateTime? after
+        {
+            get { return this.getattr("after") as DateTime?; }
+            set { this.setattr("after", value); }
+        }
+        public List<int> afterjids
+        {
+            get { return this.getattr("afterjids") as List<int>; }
+            set { this.setattr("afterjids", value); }
+        }
+        public List<object> init
+        {
+            get { return this.getattr("init") as List<object>; }
+            set { this.setattr("init", value); }
+        }
+        public int? atleast
+        {
+            get { return this.getattr("atleast") as int?; }
+            set { this.setattr("atleast", value); }
+        }
+        public int? atmost
+        {
+            get { return this.getattr("atmost") as int?; }
+            set { this.setattr("atmost", value); }
+        }
+        public int? etalevel
+        {
+            get { return this.getattr("etalevel") as int?; }
+            set { this.setattr("etalevel", value); }
+        }
+        public List<string> tags
+        {
+            get { return this.getattr("tags") as List<string>; }
+            set { this.setattr("tags", value); }
+        }
+        public float? priority
+        {
+            get { return this.getattr("priority") as float?; }
+            set { this.setattr("priority", value); }
+        }
+        public string service
+        {
+            get { return this.getattr("service") as string; }
+            set { this.setattr("service", value); }
+        }
+        public List<string> envkey
+        {
+            get { return this.getattr("envkey") as List<string>; }
+            set { this.setattr("envkey", value); }
+        }
+        public string comment
+        {
+            get { return this.getattr("comment") as string; }
+            set { this.setattr("comment", value); }
+        }
+        public string metadata
+        {
+            get { return this.getattr("metadata") as string; }
+            set { this.setattr("metadata", value); }
+        }
+        public string editpolicy
+        {
+            get { return this.getattr("editpolicy") as string; }
+            set { this.setattr("editpolicy", value); }
+        }
+        public List<Element> cleanup
+        {
+            get { return this.getattr("cleanup") as List<Element>; }
+            set { this.setattr("cleanup", value); }
+        }
+        public List<Element> postscript
+        {
+            get { return this.getattr("postscript") as List<Element>; }
+            set { this.setattr("postscript", value); }
+        }
+        public List<Element> dirmaps
+        {
+            get { return this.getattr("dirmaps") as List<Element>; }
+            set { this.setattr("dirmaps", value); }
+        }
+        public bool serialsubtasks
+        {
+            get { return true == this.getattr("serialsubtasks") as bool?; }
+            set { this.setattr("serialsubtasks", value); }
+        }
+        public List<Element> subtasks
+        {
+            get { return this.getattr("subtasks") as List<Element>; }
+            set { this.setattr("subtasks", value); }
+        }
+
+        public Job(Dictionary<string, object> kw = null) : base(Attributes(), kw)
         {
         }
         static List<Attribute> Attributes()
@@ -783,18 +903,17 @@ namespace tractor.api.author
     }
 
     // A Task element defines the attributes of a task and contains
-    //     other elements definining the task such as commands and subtasks.
+    //     other elements defining the task such as commands and subtasks.
     public class Task : KeyValueElement, ISubtaskMixin, ICleanupMixin
     {
-        public Task(Hashtable kw, string argv = null) : base(Attributes(), kw)
+        public Task(Dictionary<string, object> kw = null, object argv = null) : base(Attributes(), kw)
         {
             if (argv != null)
             {
-                var command = new Command(new Hashtable() { { "argv", argv } });
+                var command = new Command(new Dictionary<string, object>() { { "argv", argv } });
                 this.addCommand(command);
             }
         }
-
         public static List<Attribute> Attributes()
         {
             return new List<Attribute> {
@@ -815,6 +934,71 @@ namespace tractor.api.author
             };
         }
 
+        public string title
+        {
+            get { return this.getattr("title") as string; }
+            set { this.setattr("title", value); }
+        }
+        public string id
+        {
+            get { return this.getattr("id") as string; }
+            set { this.setattr("id", value); }
+        }
+        public string service
+        {
+            get { return this.getattr("service") as string; }
+            set { this.setattr("service", value); }
+        }
+        public int? atleast
+        {
+            get { return this.getattr("atleast") as int?; }
+            set { this.setattr("atleast", value); }
+        }
+        public int? atmost
+        {
+            get { return this.getattr("atmost") as int?; }
+            set { this.setattr("atmost", value); }
+        }
+        public List<Element> cmds
+        {
+            get { return this.getattr("cmds") as List<Element>; }
+            set { this.setattr("cmds", value); }
+        }
+        public object chaser
+        {
+            get { return this.getattr("chaser") as object; }
+            set { this.setattr("chaser", value); }
+        }
+        public object preview
+        {
+            get { return this.getattr("preview") as object; }
+            set { this.setattr("preview", value); }
+        }
+        public bool serialsubtasks
+        {
+            get { return true == this.getattr("serialsubtasks") as bool?; }
+            set { this.setattr("serialsubtasks", value); }
+        }
+        public bool resumeblock
+        {
+            get { return true == this.getattr("resumeblock") as bool?; }
+            set { this.setattr("resumeblock", value); }
+        }
+        public List<Element> cleanup
+        {
+            get { return this.getattr("cleanup") as List<Element>; }
+            set { this.setattr("cleanup", value); }
+        }
+        public string metadata
+        {
+            get { return this.getattr("metadata") as string; }
+            set { this.setattr("metadata", value); }
+        }
+        public List<Element> subtasks
+        {
+            get { return this.getattr("subtasks") as List<Element>; }
+            set { this.setattr("subtasks", value); }
+        }
         // Add the specified Command to command list of the Task.
         public virtual void addCommand(Command command)
         {
@@ -825,7 +1009,7 @@ namespace tractor.api.author
         // Instantiate a new Command element, add to command list, and return
         //         element.
         //         
-        public virtual Command newCommand(Hashtable kw)
+        public virtual Command newCommand(Dictionary<string, object> kw)
         {
             var command = new Command(kw);
             this.addCommand(command);
@@ -845,16 +1029,20 @@ namespace tractor.api.author
     //     
     public class Instance : KeyValueElement
     {
-        public Instance(Hashtable kw) : base(Attributes(), kw)
+        public Instance(Dictionary<string, object> kw) : base(Attributes(), kw)
         {
         }
-
         public static List<Attribute> Attributes()
         {
             return new List<Attribute> {
                     new Constant("Instance"),
                     new StringAttribute("title", required: true, suppressTclKey: true)
                 };
+        }
+        public string title
+        {
+            get { return this.getattr("title") as string; }
+            set { this.setattr("title", value); }
         }
 
         public override string ToString()
@@ -880,7 +1068,43 @@ namespace tractor.api.author
                     new GroupAttribute("subtasks")
                 };
         }
-        public Iterate(Hashtable kw) : base(Attributes(), kw)
+        public string varname
+        {
+            get { return this.getattr("varname") as string; }
+            set { this.setattr("varname", value); }
+        }
+        public int from
+        {
+            get { return (int)this.getattr("from"); }
+            set { this.setattr("from", value); }
+        }
+        public int frm
+        {
+            get { return (int)this.getattr("from"); }
+            set { this.setattr("from", value); }
+        }
+        public int to
+        {
+            get { return (int)this.getattr("to"); }
+            set { this.setattr("to", value); }
+        }
+        public int by
+        {
+            get { return (int)this.getattr("by"); }
+            set { this.setattr("by", value); }
+        }
+        public List<Element> template
+        {
+            get { return this.getattr("template") as List<Element>; }
+            set { this.setattr("template", value); }
+        }
+        public List<Element> subtasks
+        {
+            get { return this.getattr("subtasks") as List<Element>; }
+            set { this.setattr("subtasks", value); }
+        }
+
+        public Iterate(Dictionary<string, object> kw = null) : base(Attributes(), kw)
         {
         }
 
@@ -906,21 +1130,13 @@ namespace tractor.api.author
     // A Command element defines the attributes of a command.
     public class Command : KeyValueElement
     {
-        public Command(Hashtable kw, bool local = false) : base(Attributes(local), kw)
+        public Command(Dictionary<string, object> kw = null, object argv = null, bool local = false) : base(Attributes(local), kw)
         {
+            if (argv != null) this.argv = argv;
         }
-
         public static List<Attribute> Attributes(bool local)
         {
-            object cmdtype;
-            if (local)
-            {
-                cmdtype = "Command";
-            }
-            else
-            {
-                cmdtype = "RemoteCmd";
-            }
+            string cmdtype = local ? "Command" : "RemoteCmd";
             return new List<Attribute> {
                     new Constant(cmdtype),
                     new ArgvAttribute("argv", required: true, suppressTclKey: true),
@@ -944,5 +1160,102 @@ namespace tractor.api.author
                     new StringAttribute("metadata")
                 };
         }
+
+        public object argv
+        {
+            get { return this.getattr("argv"); }
+            set { this.setattr("argv", value); }
+        }
+        public string msg
+        {
+            get { return this.getattr("msg") as string; }
+            set { this.setattr("msg", value); }
+        }
+        public List<string> tags
+        {
+            get { return this.getattr("tags") as List<string>; }
+            set { this.setattr("tags", value); }
+        }
+        public string service
+        {
+            get { return this.getattr("service") as string; }
+            set { this.setattr("service", value); }
+        }
+        public string metrics
+        {
+            get { return this.getattr("metrics") as string; }
+            set { this.setattr("metrics", value); }
+        }
+        public string id
+        {
+            get { return this.getattr("id") as string; }
+            set { this.setattr("id", value); }
+        }
+        public string refersto
+        {
+            get { return this.getattr("refersto") as string; }
+            set { this.setattr("refersto", value); }
+        }
+        public bool expand
+        {
+            get { return this.getattr("expand") as bool? ?? false; }
+            set { this.setattr("expand", value); }
+        }
+        public int atleast
+        {
+            get { return this.getattr("atleast") as int? ?? 0; }
+            set { this.setattr("atleast", value); }
+        }
+        public int atmost
+        {
+            get { return this.getattr("atmost") as int? ?? 0; }
+            set { this.setattr("atmost", value); }
+        }
+        public int minrunsecs
+        {
+            get { return this.getattr("minrunsecs") as int? ?? 0; }
+            set { this.setattr("minrunsecs", value); }
+        }
+        public int maxrunsecs
+        {
+            get { return this.getattr("maxrunsecs") as int? ?? 0; }
+            set { this.setattr("maxrunsecs", value); }
+        }
+        public bool samehost
+        {
+            get { return this.getattr("samehost") as bool? ?? false; }
+            set { this.setattr("samehost", value); }
+        }
+        public List<string> envkey
+        {
+            get { return this.getattr("envkey") as List<string>; }
+            set { this.setattr("envkey", value); }
+        }
+        public List<int> retryrc
+        {
+            get { return this.getattr("retryrc") as List<int>; }
+            set { this.setattr("retryrc", value); }
+        }
+        public string when
+        {
+            get { return this.getattr("when") as string; }
+            set { this.setattr("when", value); }
+        }
+        public List<string> resumewhile
+        {
+            get { return this.getattr("resumewhile") as List<string>; }
+            set { this.setattr("resumewhile", value); }
+        }
+        public bool resumepin
+        {
+            get { return this.getattr("resumepin") as bool? ?? false; }
+            set { this.setattr("resumepin", value); }
+        }
+        public string metadata
+        {
+            get { return this.getattr("metadata") as string; }
+            set { this.setattr("metadata", value); }
+        }
+
     }
 }
