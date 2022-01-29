@@ -14,16 +14,15 @@ namespace tractor.api.author
         //     
         public static void test_short()
         {
-            var jobDesc = new Dictionary<string, object>()
+            var job = new Job()
             {
-                { "title", "two layer job" },
-                { "priority", 10 },
-                { "after", new DateTime(2012, 12, 14, 16, 24, 5) }
+                title = "two layer job",
+                priority = 10,
+                after = new DateTime(2012, 12, 14, 16, 24, 5),
             };
-            var job = new Job(jobDesc);
-            var compTask = job.newTask(new Dictionary<string, object>() { { "title", "comp" } }, "comp fg.tif bg.tif final.tif");
-            var fgTask = compTask.newTask(new Dictionary<string, object>() { { "title", "render fg" } }, "prman foreground.rib");
-            var bgTask = compTask.newTask(new Dictionary<string, object>() { { "title", "render bg" } }, "prman foreground.rib");
+            var compTask = job.newTask(title: "comp", argv: "comp fg.tif bg.tif final.tif");
+            var fgTask = compTask.newTask(title: "render fg", argv: "prman foreground.rib");
+            var bgTask = compTask.newTask(title: "render bg", argv: "prman foreground.rib");
             Console.WriteLine(job);
         }
 
@@ -95,11 +94,11 @@ namespace tractor.api.author
             job.metadata = "show=rat shot=food";
             job.editpolicy = "canadians";
             job.addCleanup(new Command(argv: "/bin/cleanup this"));
-            job.newCleanup(argv: new List<object> {
+            job.newCleanup(argv: new List<string> {
                 "/bin/cleanup",
                 "that"
             });
-            job.addPostscript(new Command(argv: new List<object> {
+            job.addPostscript(new Command(argv: new List<string> {
                 "/bin/post",
                 "this"
             }));
@@ -114,18 +113,18 @@ namespace tractor.api.author
             foreach (var i in Enumerable.Range(0, 2))
             {
                 var task = new Task();
-                task.title = String.Format("render layer %d", i);
-                task.id = String.Format("id%d", i);
-                task.chaser = String.Format("chase file%i", i);
-                task.preview = String.Format("preview file%i", i);
+                task.title = String.Format("render layer {0}", i);
+                task.id = String.Format("id{0}", i);
+                task.chaser = String.Format("chase file{0}", i);
+                task.preview = String.Format("preview file{0}", i);
                 task.service = "services&&more";
                 task.atleast = 7;
                 task.atmost = 8;
                 task.serialsubtasks = false;
-                task.metadata = String.Format("frame=%d", i);
-                task.addCleanup(new Command(argv: String.Format("/bin/cleanup file%i", i)));
-                var command = new Command(local: (i % 2) == 0);
-                command.argv = String.Format("prman layer%d.rib", i);
+                task.metadata = String.Format("frame={0}", i);
+                task.addCleanup(new Command(argv: String.Format("/bin/cleanup file{0}", i)));
+                var command = new Command(local: (i % 2) == 1);
+                command.argv = String.Format("prman layer{0}.rib", i);
                 command.msg = "command message";
                 command.service = "cmdservice&&more";
                 command.tags = new List<string> {
@@ -134,7 +133,7 @@ namespace tractor.api.author
                 };
                 command.metrics = "metrics string";
                 command.id = String.Format("cmdid{0}", i);
-                command.refersto = String.Format("refersto%i", i);
+                command.refersto = String.Format("refersto{0}", i);
                 command.expand = false;
                 command.atleast = 1;
                 command.atmost = 5;
@@ -156,10 +155,10 @@ namespace tractor.api.author
                     "/usr/bin/grep",
                     "-q",
                     "Checkpoint",
-                    String.Format("file.%d.exr", i)
+                    String.Format("file.{0}.exr", i)
                 };
                 command.resumepin = (i == 1);
-                command.metadata = String.Format("command metadata %i", i);
+                command.metadata = String.Format("command metadata {0}", i);
                 task.addCommand(command);
                 compTask.addChild(task);
             }
@@ -167,8 +166,8 @@ namespace tractor.api.author
             iterate.varname = "i";
             iterate.frm = 1;
             iterate.to = 10;
-            iterate.addToTemplate(new Task(title: "process task", argv: "process command"));
-            iterate.addChild(new Task(title: "process task", argv: "ls -l"));
+            iterate.addToTemplate(new Task(title : "process task",argv: "process command"));
+            iterate.addChild(new Task(title : "process task",argv: "ls -l") );
             job.addChild(iterate);
             var instance = new Instance(title: "id1");
             job.addChild(instance);
@@ -208,9 +207,9 @@ namespace tractor.api.author
             {
                 t2.addChild(iterate);
             }
-            catch
+            catch(Exception err)
             {
-                Console.WriteLine(String.Format("Good, we expected to get an exception for adding a iterate to two parents: %s", err.ToString()));
+                Console.WriteLine(String.Format("Good, we expected to get an exception for adding a iterate to two parents: {0}", err.Message));
             }
         }
 
@@ -223,23 +222,23 @@ namespace tractor.api.author
             try
             {
                 job.title = "okay to set title";
-                job.foo = "not okay to set foo";
+                //job.foo = "not okay to set foo";
             }
-            catch (AttributeError)
+            catch (AttributeError err)
             {
-                Console.WriteLine(String.Format("Good, we expected to get an exception for setting an invalid attribute: %s", err.ToString()));
+                Console.WriteLine(String.Format("Good, we expected to get an exception for setting an invalid attribute: {0}", err.Message));
             }
         }
 
         // // This tests the spool method on a job.
         public static void test_spool()
         {
-            var job = new Job(title: "two layer job", priority: 10, after: datetime.datetime(2012, 12, 14, 16, 24, 5));
+            var job = new Job(title: "two layer job") { priority = 10, after = new DateTime(2012, 12, 14, 16, 24, 5) };
             var compTask = job.newTask(title: "comp", argv: "comp fg.tif bg.tif out.tif", service: "pixarRender");
             var fgTask = compTask.newTask(title: "render fg", argv: "prman foreground.rib", service: "pixarRender");
             var bgTask = compTask.newTask(title: "render bg", argv: "prman foreground.rib", service: "pixarRender");
             //print(job.spool(spoolfile="/spool/file", spoolhost="spoolhost", hostname="myengine", port=8080))
-            Console.WriteLine(job.spool(spoolfile: "/spool/file", spoolhost: "spoolhost"));
+            //Console.WriteLine(job.spool(spoolfile: "/spool/file", spoolhost: "spoolhost"));
         }
 
         // // This builds a job with varios postscript commands.  Submit the
@@ -260,7 +259,7 @@ namespace tractor.api.author
             }
             catch (TypeError err)
             {
-                Console.WriteLine(String.Format("Good, we caught an invalid value for when: %s", err.ToString()));
+                Console.WriteLine(String.Format("Good, we caught an invalid value for when: {0}", err.Message));
             }
             Console.WriteLine(job.asTcl());
         }
@@ -283,7 +282,7 @@ namespace tractor.api.author
             }
             catch (TypeError err)
             {
-                Console.WriteLine(String.Format("Good, we caught an invalid value for when: %s", err.ToString()));
+                Console.WriteLine(String.Format("Good, we caught an invalid value for when: {0}", err.Message));
             }
             Console.WriteLine(job.asTcl());
         }

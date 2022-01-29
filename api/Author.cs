@@ -55,9 +55,9 @@ namespace tractor.api.author
         }
 
         // Convert a string to a list of strings.
-        public static string[] str2argv(string s)
+        public static List<string> str2argv(string s)
         {
-            return s.Split();
+            return s.Split().ToList();
         }
     }
     // The Attribute class presents a way to define the nature of
@@ -90,9 +90,14 @@ namespace tractor.api.author
         // Set the value of the attribute.
         public virtual void setValue(object value)
         {
+            if(!this.required && value == null)
+            {
+                this.value = null;
+                return;
+            }
             if (!this.isValid(value))
             {
-                throw new TypeError(String.Format("{0} is not a valid value for %s", value.ToString(), this.name));
+                throw new TypeError(String.Format("{0} is not a valid value for {1}", value.ToString(), this.name));
             }
             this.value = value;
         }
@@ -133,7 +138,7 @@ namespace tractor.api.author
             {
                 return "";
             }
-            return String.Format("{0} {%s}", this.tclKey(), this.value);
+            return String.Format("{0} {{{1}}}", this.tclKey(), this.value);
         }
     }
 
@@ -182,8 +187,8 @@ namespace tractor.api.author
             {
                 return "";
             }
-            var format = String.Format("{{0}} {{1:{0}F}}", this.precision);
-            return String.Format(format, this.tclKey(), this.value);
+            var valueStr = string.Format($"{{0:F{this.precision}}}", this.value);
+            return $"{this.tclKey()} {{{valueStr}}}";
         }
     }
 
@@ -208,7 +213,7 @@ namespace tractor.api.author
             {
                 return "";
             }
-            return String.Format("%s %d", this.tclKey(), this.value);
+            return String.Format("{0} {1}", this.tclKey(), this.value);
         }
     }
 
@@ -223,7 +228,7 @@ namespace tractor.api.author
         {
             if (!(value is DateTime))
             {
-                throw new TypeError(String.Format("%s is a %s, not a datetime type for %s", value.ToString(), value.GetType(), this.name));
+                throw new TypeError(String.Format("{0} is a {1}, not a datetime type for {2}", value.ToString(), value.GetType(), this.name));
             }
             this.value = value;
         }
@@ -243,7 +248,7 @@ namespace tractor.api.author
                 return "";
             }
             var t = value as DateTime?;
-            return String.Format("%s {%s}", this.tclKey(), t?.ToString("%m %d %H:%M"));
+            return String.Format("{0} {{{1}}}", this.tclKey(), t?.ToString("%M %d %H:%m"));
         }
     }
 
@@ -296,8 +301,8 @@ namespace tractor.api.author
         // Return True if there is at least one element in the list.
         public override bool hasValue()
         {
-            var strList = this.value as List<string>;
-            return strList != null && strList.Count > 0;
+            var strList = this.value as ICollection<string>;
+            return strList?.Count > 0;
         }
 
         // Return the Tcl representation of the attribute name and value.
@@ -309,12 +314,12 @@ namespace tractor.api.author
                 return "";
             }
             var args = new List<object>();
-            foreach (var value in this.value as List<string>)
+            foreach (var value in this.value as ICollection<string>)
             {
                 var val = value.ToString().Replace("\\", "\\\\");
-                args.Add(String.Format("{0}", val));
+                args.Add(String.Format("{{{0}}}", val));
             }
-            return String.Format("{0} {{1}}", this.tclKey(), string.Join(" ", args));
+            return String.Format("{0} {{{1}}}", this.tclKey(), string.Join(" ", args));
         }
     }
 
@@ -337,7 +342,8 @@ namespace tractor.api.author
         // Return True if there is at least one element in the list.
         public override bool hasValue()
         {
-            return (this.value as List<string>).Count > 0;
+            var intList = this.value as List<int>;
+            return intList?.Count > 0;
         }
 
         // Return the Tcl representation of the attribute name and value.
@@ -348,7 +354,7 @@ namespace tractor.api.author
             {
                 return "";
             }
-            return String.Format("%s {%s}", this.tclKey(), string.Join(" ", this.value as List<string>));
+            return String.Format("{0} {{{1}}}", this.tclKey(), string.Join(" ", this.value as IEnumerable<int>));
         }
     }
 
@@ -366,9 +372,13 @@ namespace tractor.api.author
             {
                 this.value = Indent.str2argv(value as string);
             }
+            else if ((value as ICollection<string>)?.Count > 0)
+            {
+                this.value = value;
+            }
             else
             {
-                this.value = new List<string>() { ":" };
+                throw new AttributeError(string.Format("argv value can not accept {0}", value));
             }
         }
     }
@@ -383,7 +393,7 @@ namespace tractor.api.author
         public override bool isValid(object value)
         {
             // values of True and False will pass as well
-            return new List<object> { 0, 1, true, false }.Contains(value);
+            return new List<object> { true, false }.Contains(value);
         }
 
         // Return the Tcl representation of the attribute name and value.
@@ -394,7 +404,7 @@ namespace tractor.api.author
             {
                 return "";
             }
-            return String.Format("%s %d", this.tclKey(), Convert.ToInt32(this.value));
+            return String.Format("{0} {1}", this.tclKey(), Convert.ToInt32(this.value));
         }
     }
 
@@ -439,7 +449,7 @@ namespace tractor.api.author
             var lines = (from element in this.value as List<Element>
                          select (Indent.tclIndentStr() + element.asTcl())).ToList();
             Indent.TclIndentLevel -= 1;
-            return String.Format(" -%s {\n%s\n%s}", this.name, string.Join("\n", lines), Indent.tclIndentStr());
+            return String.Format(" -{0} {{\n{1}\n{2}}}", this.name, string.Join("\n", lines), Indent.tclIndentStr());
         }
     }
     // An Element is a base class to represent components of a job that define
@@ -461,7 +471,7 @@ namespace tractor.api.author
         public virtual void setattr(string attr, object value)
         {
             if (attr == "parent") parent = value;
-            else throw new AttributeError(string.Format("%s is not a valid attribute of a %s", attr));
+            else throw new AttributeError(string.Format("{0} is not a valid attribute of a {1}", attr, this.GetType().Name));
         }
         public abstract string asTcl();
     }
@@ -474,7 +484,7 @@ namespace tractor.api.author
     {
         public List<Attribute> attributes;
         public Dictionary<string, Attribute> attributeByName;
-        public KeyValueElement(List<Attribute> attributes, Dictionary<string, object> kw = null)
+        public KeyValueElement(List<Attribute> attributes)
         {
             // lookup of attribute by name required for __getattr__ and __setattr__
             this.attributes = attributes;
@@ -485,14 +495,6 @@ namespace tractor.api.author
                 if (attr.alias != null)
                 {
                     this.attributeByName[attr.alias] = attr;
-                }
-            }
-            // initialize attributes passes as keyword parameters
-            if (kw != null)
-            {
-                foreach (string key in kw.Keys)
-                {
-                    setattr(key, kw[key]);
                 }
             }
         }
@@ -562,7 +564,7 @@ namespace tractor.api.author
         // Return the Tcl representation of the dirmap expression.
         public override string asTcl()
         {
-            return String.Format("{{{0}} {{1}} {2}}", this.src, this.dst, this.zone);
+            return String.Format("{{{0} {1} {2}}}", $"{{{this.src}}}", $"{{{this.dst}}}", $"{this.zone}");
         }
     }
 
@@ -583,7 +585,7 @@ namespace tractor.api.author
             {
                 // this task already has a parent, so replace with an Instance
                 var title = element.getattr("title") as string;
-                var instance = new Instance(new Dictionary<string, object>() { { "title", title } });
+                var instance = new Instance(title);
                 (self.attributeByName["subtasks"] as GroupAttribute).addElement(instance);
             }
             else if (element.parent != null)
@@ -600,9 +602,12 @@ namespace tractor.api.author
         // Instantiate a new Task element, add to subtask list, and return
         //         element.
         //         
-        public static Task newTask(this KeyValueElement self, Dictionary<string, object> kw, string argv = null)
+        public static Task newTask(this KeyValueElement self
+            , string title = null
+            , string service = null
+            , string argv = null)
         {
-            var task = new Task(kw, argv);
+            var task = new Task(title:title, argv:argv, service: service);
             addChild(self, task);
             return task;
         }
@@ -670,9 +675,9 @@ namespace tractor.api.author
         // Instantiate a new Command element, adds to cleanup command
         //         list, and returns element.
         //         
-        public static object newCleanup(this KeyValueElement item, Dictionary<string, object> kw = null, object argv = null)
+        public static object newCleanup(this KeyValueElement item, object argv = null)
         {
-            var command = new Command(kw, argv);
+            var command = new Command(argv);
             addCleanup(item, command);
             return command;
         }
@@ -698,9 +703,11 @@ namespace tractor.api.author
         // Instantiate a new Command element, add to postscript command list,
         //         and return element.
         //         
-        public static Command newPostscript(this KeyValueElement self, Dictionary<string, object> kw = null, object argv = null)
+        public static Command newPostscript(this KeyValueElement self, string service = null, string when = null, object argv = null)
         {
-            var command = new Command(kw, argv);
+            var command = new Command(argv: argv) { service = service, when = when };
+            if (service != null) command.service = service;
+            if (when != null) command.when = when;
             addPostscript(self, command);
             return command;
         }
@@ -849,8 +856,9 @@ namespace tractor.api.author
             set { this.setattr("subtasks", value); }
         }
 
-        public Job(Dictionary<string, object> kw = null) : base(Attributes(), kw)
+        public Job(string title = null) : base(Attributes())
         {
+            if (title != null) this.title = title;
         }
         static List<Attribute> Attributes()
         {
@@ -906,11 +914,19 @@ namespace tractor.api.author
     //     other elements defining the task such as commands and subtasks.
     public class Task : KeyValueElement, ISubtaskMixin, ICleanupMixin
     {
-        public Task(Dictionary<string, object> kw = null, object argv = null) : base(Attributes(), kw)
+        public Task(string title = null, object argv = null, string service = null) : base(Attributes())
         {
-            if (argv != null)
+            if (title != null)
             {
-                var command = new Command(new Dictionary<string, object>() { { "argv", argv } });
+                this.title = title;
+            }
+            if (argv == null && service != null)
+            {
+                this.service = service;
+            }
+            else if (argv != null)
+            {
+                var command = new Command(argv: argv) { service = service };
                 this.addCommand(command);
             }
         }
@@ -1029,8 +1045,9 @@ namespace tractor.api.author
     //     
     public class Instance : KeyValueElement
     {
-        public Instance(Dictionary<string, object> kw) : base(Attributes(), kw)
+        public Instance(string title = null) : base(Attributes())
         {
+            if (title != null) this.title = title;
         }
         public static List<Attribute> Attributes()
         {
@@ -1104,7 +1121,7 @@ namespace tractor.api.author
             set { this.setattr("subtasks", value); }
         }
 
-        public Iterate(Dictionary<string, object> kw = null) : base(Attributes(), kw)
+        public Iterate() : base(Attributes())
         {
         }
 
@@ -1130,9 +1147,9 @@ namespace tractor.api.author
     // A Command element defines the attributes of a command.
     public class Command : KeyValueElement
     {
-        public Command(Dictionary<string, object> kw = null, object argv = null, bool local = false) : base(Attributes(local), kw)
+        public Command(object argv = null, bool local = false) : base(Attributes(local))
         {
-            if (argv != null) this.argv = argv;
+            if(argv!=null)this.argv = argv;
         }
         public static List<Attribute> Attributes(bool local)
         {

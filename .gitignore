@@ -1,3 +1,4 @@
 obj
 /.vs/tractorapi.net
 /**/bin/
+__pycache__
