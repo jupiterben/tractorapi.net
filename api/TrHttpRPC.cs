@@ -8,17 +8,24 @@ namespace tractor.api
 {
     public class TrHttpError : Exception
     {
+        public TrHttpError(string msg) : base(msg) { }
+    }
+
+    public interface ILogger
+    {
+        void debug(string msg);
     }
 
     public class fake_json
     {
+        bool fakeJSON;
         public fake_json()
         {
-            this.fakeJSON = 1;
+            this.fakeJSON = true;
         }
 
         // A stand-in for the real json.loads(), using eval() instead.
-        public virtual object loads(object jsonstr)
+        public virtual object loads(string jsonstr)
         {
             //
             // NOTE: In general, tractor-blade code should (and does) simply
@@ -43,17 +50,18 @@ namespace tractor.api
         }
     }
 
-    public static object json = fake_json();
-
     public class TrHttpRPC
     {
+        public static fake_json json = new fake_json();
+
+        int port;
         public TrHttpRPC(
             string host,
             int port = 80,
-            object logger = null,
-            object apphdrs = null,
-            object urlprefix = "/Tractor/",
-            object timeout = 65.0)
+            ILogger logger = null,
+            string apphdrs = null,
+            string urlprefix = "/Tractor/",
+            double timeout = 65.0)
         {
             this.port = port;
             this.lastPeerQuad = "0.0.0.0";
@@ -66,10 +74,6 @@ namespace tractor.api
             this.passwdRequired = null;
             this.passwordhashfunc = null;
             this.host = host;
-            if (type(port) != @int)
-            {
-                throw TrHttpError(String.Format("port value '%s' is not of type integer", port.ToString()));
-            }
             if (port <= 0)
             {
                 var _tup_1 = host.partition(":");
@@ -109,9 +113,7 @@ namespace tractor.api
             object tractorverb,
             object formdata,
             object parseCtxName = null,
-            object xheaders = new Dictionary<object, object>
-            {
-            },
+            Dictionary<object, object> xheaders = null,
             object preAnalyzer = null,
             object postAnalyzer = null)
         {
