@@ -7,7 +7,7 @@ using System.Net;
 
 namespace tractor.api
 {
-    public static class TrUtil
+    public static class trutil
     {
         public static object _localhost = null;
 
@@ -42,6 +42,8 @@ namespace tractor.api
         // Simple class to support Terminal text coloring.
         public class TerminalColor
         {
+            string foreground;
+            string background;
             public Dictionary<string, Dictionary<string, int>> colorcodes = new Dictionary<string, Dictionary<string, int>> {
                 {
                     "bg",
@@ -98,16 +100,16 @@ namespace tractor.api
                             "white",
                             37}}}};
 
-            public TerminalColor(string fg, object bg = null)
+            public TerminalColor(string fg, string bg = null)
             {
                 if (!this.colorcodes["fg"].ContainsKey(fg))
                 {
                     throw new UnknownTerminalColor($"'{fg}' is an unknown foreground color, must be one of {this.colorcodes["fg"].Keys}");
                 }
                 this.foreground = fg;
-                if (bg && !this.colorcodes["bg"].Contains(bg))
+                if (bg != null && !this.colorcodes["bg"].ContainsKey(bg))
                 {
-                    throw new UnknownTerminalColor(String.Format("'%s' is an unknown background color, must be one of %s", bg, this.colorcodes["bg"].keys()));
+                    throw new UnknownTerminalColor($"'{bg}' is an unknown background color, must be one of {this.colorcodes["bg"].Keys}");
                 }
                 this.background = bg;
             }
@@ -116,10 +118,12 @@ namespace tractor.api
             //         interpretted by a terminal.
             public virtual object getEscSeq()
             {
-                var seq = String.Format("\x1b[%.2d", this.colorcodes["fg"][this.foreground]);
-                if (this.background)
+                var fg = this.colorcodes["fg"][this.foreground].ToString("D2");
+                var seq = $"\x1b[{fg}";
+                if (this.background != null)
                 {
-                    seq += String.Format(";%.2d", this.colorcodes["bg"][this.background]);
+                    var bg = this.colorcodes["bg"][this.background].ToString("D2");
+                    seq += $";{bg}";
                 }
                 seq += "m";
                 return seq;
@@ -132,64 +136,48 @@ namespace tractor.api
             }
 
             // Color a string of text this color.
-            public virtual object colorStr(object text)
+            public virtual string colorStr(string text)
             {
                 return this.getEscSeq() + text + this.reset();
             }
-
-            // Tests equality with other TerminalColors.
-            public virtual object @__eq__(object color)
-            {
-                return this.foreground == color.foreground && this.background == color.background;
-            }
         }
 
-        public static object LogColors = new Dictionary<object, object> {
-            {
-                "yellow",
-                TerminalColor("yellow")},
-            {
-                "red",
-                TerminalColor("red")},
-            {
-                "blue",
-                TerminalColor("blue")},
-            {
-                "white",
-                TerminalColor("white")},
-            {
-                "cyan",
-                TerminalColor("cyan")}};
+        public static Dictionary<string, TerminalColor> LogColors = new Dictionary<string, TerminalColor> {
+            {"yellow",new TerminalColor("yellow")},
+            {"red",new TerminalColor("red")},
+            {"blue",new TerminalColor("blue")},
+            {"white",new TerminalColor("white")},
+            {"cyan",new TerminalColor("cyan")}};
 
         // Appends a time stamp and '==>' to a string before printing
         //     to stdout.
-        public static object log(object msg, object outfile = null, object color = null)
+        public static void log(string msg, System.IO.Stream outfile = null, string color = null)
         {
-            if (!outfile)
+            if (outfile == null)
             {
-                outfile = sys.stdout;
+                outfile = Console.OpenStandardOutput();
             }
-            if (color && LogColors.Contains(color))
+            if (color!= null && LogColors.ContainsKey(color))
             {
                 var terminalColor = LogColors[color];
                 msg = terminalColor.colorStr(msg);
             }
             try
             {
-                Console.WriteLine(time.ctime() + " ==> " + msg, file: outfile);
-                outfile.flush();
+                Console.WriteLine(DateTime.Now + " ==> " + msg);
+                outfile.Flush();
             }
             catch
             {
             }
         }
 
-        public static object logWarning(object msg)
+        public static void logWarning(object msg)
         {
             log("WARNING: " + msg, color: "yellow");
         }
 
-        public static object logError(object msg)
+        public static void logError(object msg)
         {
             log("ERROR: " + msg, color: "red");
         }

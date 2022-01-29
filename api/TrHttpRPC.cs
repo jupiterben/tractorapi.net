@@ -12,7 +12,6 @@ namespace tractor.api
 
     public class fake_json
     {
-
         public fake_json()
         {
             this.fakeJSON = 1;
@@ -49,12 +48,10 @@ namespace tractor.api
     public class TrHttpRPC
     {
         public TrHttpRPC(
-            object host,
-            object port = 80,
+            string host,
+            int port = 80,
             object logger = null,
-            object apphdrs = new Dictionary<object, object>
-            {
-            },
+            object apphdrs = null,
             object urlprefix = "/Tractor/",
             object timeout = 65.0)
         {
