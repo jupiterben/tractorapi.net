@@ -83,10 +83,10 @@ namespace tractor.api
             this.host = host;
             if (port <= 0)
             {
-                var _tup_1 = host.partition(":");
-                var h = _tup_1.Item1;
-                var c = _tup_1.Item2;
-                var p = _tup_1.Item3;
+                var _tup_1 = host.Split(':');
+                var h = _tup_1[0];
+                //var c = _tup_1.Item2;
+                var p = _tup_1[1];
                 if (p)
                 {
                     this.host = h;
