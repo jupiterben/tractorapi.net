@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -9,11 +10,6 @@ namespace tractor.api
     public class TrHttpError : Exception
     {
         public TrHttpError(string msg) : base(msg) { }
-    }
-
-    public interface ILogger
-    {
-        void debug(string msg);
     }
 
     public class fake_json
@@ -43,10 +39,10 @@ namespace tractor.api
             // "native" types that aren't available in python; however,
             // these types aren't expected to appear in tractor data.
             //
-            object null = null;
-            var @true = true;
-            var @false = false;
-            return eval(jsonstr.replace("\r", ""));
+//             object null = null;
+//             var @true = true;
+//             var @false = false;
+            return JsonConvert.DeserializeObject(jsonstr);
         }
     }
 
@@ -55,6 +51,17 @@ namespace tractor.api
         public static fake_json json = new fake_json();
 
         int port;
+        string lastPeerQuad;
+        bool engineResolved;
+        bool resolveFallbackMsgSent;
+        ILogger logger;
+        string appheaders;
+        string urlprefix;
+        double timeout;
+        string passwdRequired;
+        object passwordhashfunc;
+        string host;
+
         public TrHttpRPC(
             string host,
             int port = 80,
@@ -569,7 +576,7 @@ namespace tractor.api
                 }
                 try
                 {
-                    n = float(v[1]);
+                    n = float.Parse(v[1]);
                 }
                 catch
                 {

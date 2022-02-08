@@ -213,7 +213,7 @@ namespace tractor.api.author
             {
                 return "";
             }
-            return String.Format("{0} {1}", this.tclKey(), this.value);
+            return $"{this.tclKey()} {this.value}";
         }
     }
 
@@ -228,7 +228,7 @@ namespace tractor.api.author
         {
             if (!(value is DateTime))
             {
-                throw new TypeError(String.Format("{0} is a {1}, not a datetime type for {2}", value.ToString(), value.GetType(), this.name));
+                throw new TypeError($"{value.ToString()} is a {value.GetType()}, not a datetime type for {this.name}");
             }
             this.value = value;
         }

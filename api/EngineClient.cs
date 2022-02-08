@@ -164,6 +164,24 @@ public class DBExecError : EngineClientError
 
 namespace tractor.api
 {
+    using Newtonsoft.Json;
+    using System.Net.Http;
+    using re = System.Text.RegularExpressions.Regex;
+    using os = System.OperatingSystem;
+
+    public interface ILogger
+    {
+        void debug(string msg);
+        void Login(string user, string password);
+    }
+
+    public class TrHttpRPC
+    {
+        public TrHttpRPC(string hostname, int port, object apphdrs, double timeout) { }
+        public bool PasswordRequired() { return false; }
+        public object Login(string user, string password) { return null; }
+        public Tuple<int, object> Transaction(string url, object payload, string translation, object headers) { return null; }
+    }
 
     public class EngineClient
     {
@@ -206,6 +224,19 @@ namespace tractor.api
         string sessionFilename;
         object tsid;
         TrHttpRPC conn;
+        //HttpClient conn;
+
+        public static void setattr(object obj, string key, object value)
+        {
+            var propertyInfo = obj.GetType().GetProperty(key, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            propertyInfo.SetValue(obj, value, null);
+        }
+
+        public static object getattr(object obj, string key, object defaultValue)
+        {
+            var propertyInfo = obj.GetType().GetProperty(key, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            return propertyInfo.GetValue(obj);
+        }
 
         public EngineClient(
             string hostname = null,
@@ -245,10 +276,10 @@ namespace tractor.api
             this.conn = null;
         }
 
-        public virtual object xheaders()
+        public virtual Dictionary<string, object> xheaders()
         {
             // dynamically generate xheaders so that it can adapt to a reconfiguration of the hostname or port
-            return new Dictionary<string, string> {
+            return new Dictionary<string, object> {
                     {"Host",$"{this.hostname}:{this.port}"},
                     {"Cookie",$"TractorUser={this.user}"}
         };
@@ -260,7 +291,7 @@ namespace tractor.api
             // if engine is specified, replace the class engine client object
             foreach (DictionaryEntry _tup_1 in kw)
             {
-                var key = _tup_1.Key;
+                var key = _tup_1.Key as string;
                 var value = _tup_1.Value;
                 if (!this.VALID_PARAMETERS.Contains(key))
                 {
@@ -282,7 +313,7 @@ namespace tractor.api
         {
             if (this.debug)
             {
-                msg = String.Format("[%s:%s] %s", this.hostname, this.port, msg);
+                msg = $"[{this.hostname}:{this.port}] {msg}";
                 if (this.logger != null)
                 {
                     this.logger.debug(msg);
@@ -322,29 +353,31 @@ namespace tractor.api
         public virtual bool canReuseSession()
         {
             this.dprint("test if session can be reused");
+            object sessionInfo = null;
             if (this.sessionFilename == null || !File.Exists(this.sessionFilename))
             {
                 return false;
             }
             try
             {
-                var f = open(this.sessionFilename);
-                var sessionInfo = json.load(f);
-                f.close();
+                var f = File.ReadAllText(this.sessionFilename);
+                sessionInfo = JsonConvert.DeserializeObject(f);
             }
-            catch
+            catch (Exception err)
             {
-                trutil.logWarning(String.Format("problem reading session file: %s", err.ToString()));
+                trutil.logWarning($"problem reading session file: {err.Message}");
                 return false;
             }
-            var tsid = sessionInfo.get("tsid");
+            var tsid = getattr(sessionInfo, "tsid", null);
             // test session id
             try
             {
-                this._transaction(this.CONTROL, new Dictionary<object, object> {
+                this._transaction(this.CONTROL, new Dictionary<string, object> {
                         {"q","status"},
-                        {"tsid",tsid}}
-                            , skipLogin: true);
+                        {"tsid",tsid}
+                }
+                , skipLogin: true);
+                return true;
             }
             catch (EngineClientError err)
             {
@@ -354,7 +387,7 @@ namespace tractor.api
         }
 
         // Returns True if the engine is using passwords for authentication.
-        public virtual object usesPasswords()
+        public virtual bool usesPasswords()
         {
             if (this.conn.PasswordRequired())
             {
@@ -374,11 +407,11 @@ namespace tractor.api
         public virtual object needsPassword()
         {
             this.dprint("test if a password needs to be specified");
-            if (!this.conn)
+            if (this.conn == null)
             {
-                this.conn = TrHttpRPC.TrHttpRPC(this.hostname, port: this.port, apphdrs: this.lmthdr, timeout: 3600);
+                this.conn = new TrHttpRPC(this.hostname, port: this.port, apphdrs: this.lmthdr, timeout: 3600);
             }
-            if (this.canReuseSession() || !this.usesPasswords() || this.password)
+            if (this.canReuseSession() || !this.usesPasswords() || this.password != null)
             {
                 this.dprint("password is not needed or has already been specified");
                 return false;
@@ -402,9 +435,8 @@ namespace tractor.api
         //         
         public virtual void open()
         {
-            object msg;
             this.dprint(String.Format("open(), self.newSession=%s, self.sessionFilename=%s", this.newSession.ToString(), this.sessionFilename.ToString()));
-            if (!this.newSession && this.conn && this.isOpen())
+            if (!this.newSession && this.conn != null && this.isOpen())
             {
                 // only reuse the existing connection if the client setting 
                 // is not explicitly requreing a new session,
@@ -413,8 +445,8 @@ namespace tractor.api
                 this.dprint("session already established");
                 return;
             }
-            this.conn = TrHttpRPC.TrHttpRPC(this.hostname, port: this.port, apphdrs: this.lmthdr, timeout: 3600);
-            if (!this.password)
+            this.conn = new TrHttpRPC(this.hostname, port: this.port, apphdrs: this.lmthdr, timeout: 3600);
+            if (this.password != null)
             {
                 if (!this.newSession && this.canReuseSession())
                 {
@@ -428,34 +460,35 @@ namespace tractor.api
                 }
             }
             this.dprint("open engine connection");
+            object response = null;
             try
             {
-                var response = this.conn.Login(this.user, this.password);
+                response = this.conn.Login(this.user, this.password);
             }
-            catch
+            catch (Exception err)
             {
-                var err = err.ToString();
-                this.dprint(String.Format("Login() failed: %s", err));
+                this.dprint($"Login() failed: {err.Message}");
                 this.tsid = null;
-                if (re.findall("login as '.*' failed", err))
+                string msg;
+                if (re.IsMatch("login as '.*' failed", err.Message))
                 {
-                    msg = String.Format("Unable to log in as user %s on engine %s:%s.", this.user, this.hostname, this.port);
+                    msg = $"Unable to log in as user {this.user} on engine {this.hostname}:{this.port}.";
                 }
                 else
                 {
-                    msg = String.Format("Engine on %s:%s is not reachable.", this.hostname, this.port);
+                    msg = $"Engine on {this.hostname}:{this.port} is not reachable.";
                 }
                 throw new OpenConnError(msg);
             }
-            this.tsid = response["tsid"];
+            this.tsid = getattr(response, "tsid", null);
             if (this.tsid == null)
             {
-                msg = String.Format("Error logging in as user %s on engine %s:%s: %s", this.user, this.hostname, this.port, err.ToString());
+                string msg = $"Error logging in as user {this.user} on engine {this.hostname}:{this.port}";
                 this.dprint(msg);
                 throw new LoginError(msg);
             }
             // save tsid to session file for future reuse
-            if (this.sessionFilename)
+            if (this.sessionFilename != null)
             {
                 this.writeSessionFile();
             }
@@ -464,14 +497,12 @@ namespace tractor.api
         // Write the session file, creating the directory if necessary.
         public virtual void writeSessionFile()
         {
-
             System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(this.sessionFilename));
-
             try
             {
                 File.WriteAllText(this.sessionFilename, $"{{\"tsid\": \"{this.tsid}\"}}\n");
             }
-            catch(Exception err)
+            catch (Exception err)
             {
                 var msg = String.Format("problem writing session file '%s': %s", this.sessionFilename.ToString(), err.ToString());
                 this.dprint(msg);
@@ -481,65 +512,66 @@ namespace tractor.api
         }
 
         // Build a URL.
-        public virtual string constructURL(string queryType,  keyValuePairs)
+        public virtual string constructURL(string queryType, Dictionary<string, object> keyValuePairs)
         {
-            var parts = new List<object>();
-            foreach (var _tup_1 in iter(keyValuePairs.items()))
+            var parts = new List<string>();
+            foreach (var _tup_1 in keyValuePairs)
             {
-                var key = _tup_1.Item1;
-                var value = _tup_1.Item2;
-                if (object.ReferenceEquals(type(value), list))
+                var key = _tup_1.Key;
+                var value = _tup_1.Value;
+                if (value is List<object>)
                 {
+                    var list = value as List<object>;
                     // this will automatically change lists into comma-separated values. e.g. [1,3,5] => '1,3,5'
-                    value = ",".join((from v in value
-                                      select v.ToString()).ToList());
+                    value = string.Join(",", list.Select(item => item.ToString()).ToList());
                 }
-                parts.append(String.Format("%s=%s", key, urllib2.quote(value.ToString())));
+
+                var urlEncode = System.Web.HttpUtility.UrlEncode(value as string);
+                parts.Add($"{key}={urlEncode}");
             }
-            if (this.tsid)
+            if (this.tsid != null)
             {
-                parts.append(String.Format("tsid=%s", this.tsid));
+                parts.Add($"tsid={this.tsid}");
             }
-            return queryType + "?" + "&".join(parts);
+            return queryType + "?" + string.Join("&", parts);
         }
 
         // Extract the important part of a traceback.
-        public virtual object _shortenTraceback(object msg)
+        public virtual string _shortenTraceback(string msg)
         {
             // extract the error message displayed on the line after the line containing "raise" 
-            var matches = re.findall(@"\n\s*raise .*\n(\w+\:.*)\n", msg);
-            if (matches)
+            var matches = re.Matches(@"\n\s*raise .*\n(\w+\:.*)\n", msg);
+            if (matches.Count > 0)
             {
                 // choose the last exception displayed (with [-1]) and the first element [0] has the full message
-                return matches[-1];
+                return matches[-1].Value;
             }
             // sometimes there is no raise line, but there is a CONTEXT line afterwards
-            matches = re.findall(@"\n(\w+\:.*)\n\nCONTEXT\:", msg);
-            if (matches)
+            matches = re.Matches(@"\n(\w+\:.*)\n\nCONTEXT\:", msg);
+            if (matches.Count > 0)
             {
                 // choose the last exception displayed (with [-1]) and the first element [0] has the full message
-                return matches[-1];
+                return matches[-1].Value;
             }
             return msg;
         }
 
         // Send URL to engine, parse and return engine's response.
         public virtual object _transaction(
-            object urltype,
-            object attrs,
+            string urltype,
+            Dictionary<string, object> attrs,
             object payload = null,
             string translation = "JSON",
-            object headers = null,
+            Dictionary<string, object> headers = null,
             bool skipLogin = false)
         {
-            object msg;
             // support lazy opening of connection
             if (skipLogin)
             {
                 // login is skipped for spooling, so there may not be a TrHttpRPC object yet
-                if (!this.conn)
+                if (this.conn == null)
                 {
-                    this.conn = TrHttpRPC.TrHttpRPC(this.hostname, port: this.port, apphdrs: this.lmthdr, timeout: 3600);
+                    this.conn = new TrHttpRPC(this.hostname, port: this.port, apphdrs: this.lmthdr, timeout: 3600);
                 }
             }
             else if (!this.isOpen())
@@ -548,27 +580,29 @@ namespace tractor.api
             }
             var url = this.constructURL(urltype, attrs);
             this.dprintUrl(url);
-            headers = headers.copy();
-            headers.update(this.xheaders());
+            headers = trutil.MergeDictData(headers, this.xheaders());
+
             var _tup_1 = this.conn.Transaction(url, payload, translation, headers);
             var rcode = _tup_1.Item1;
             var data = _tup_1.Item2;
-            if (rcode)
+            if (rcode != 0)
             {
+                string msg;
                 try
                 {
-                    var datadict = ast.literal_eval(data.ToString());
-                    var err = datadict.get("msg", String.Format("unknown message: %s", data.ToString()));
+                    object datadict = null;//ast.literal_eval(data.ToString());
+                    var err = getattr(datadict, "msg", $"unknown message: {data.ToString()}");
                     if (this.debug)
                     {
-                        msg = String.Format("[%s:%d] error %s: %s", this.hostname, this.port, datadict.get("rc", "unknown rc"), err);
+                        var rc = getattr(datadict, "rc", "unknown rc");
+                        msg = $"[{this.hostname}:{this.port}] error {rc}: {err}";
                     }
                     else
                     {
-                        msg = this._shortenTraceback(err);
+                        msg = this._shortenTraceback(err.ToString());
                     }
                 }
-                catch
+                catch (Exception)
                 {
                     msg = data.ToString();
                 }
@@ -579,17 +613,13 @@ namespace tractor.api
 
         // Fetch the next subscription message. This is a blocking call, and it is unknown
         //         how long the engine may take to respond.
-        public virtual object subscribe(object jids = new List<object> {
-                0
-            })
+        public virtual object subscribe(object jids = null)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "subscribe"},
-                    {
-                        "jids",
-                        jids}};
+            jids = jids ?? new List<int> { 0 };
+            var attrs = new Dictionary<string, object> {
+                    {"q","subscribe"},
+                    {"jids",jids}
+            };
             var result = this._transaction(this.MONITOR, attrs);
             return result;
         }
@@ -597,34 +627,34 @@ namespace tractor.api
         // Execute an arbitrary SQL statement on the postgres server, using the engine as a proxy.
         //         The result will be a dictionary, with one entry being a JSON encoded list of the
         //         result rows.
-        public virtual object dbexec(object sql)
+        public virtual List<string> dbexec(string sql)
         {
-            object err;
-            this.dprint(String.Format("sql = %s", sql));
-            var result = this._transaction(this.DB, new Dictionary<object, object> {
-                    {
-                        "q",
-                        sql}});
+            
+            this.dprint($"sql = {sql}");
+            var result = this._transaction(this.DB, new Dictionary<string, object> {
+                {"q",sql}
+            });
             // an error could be reported through either:
             //  rc: for psql client errors
             //  rows: for tractorselect traceback errors, such as for syntax errors in search clause 
-            var rc = result.get("rc", 1);
-            var rows = result.get("rows");
-            var isError = type(rows) != list;
-            this.dprint(String.Format("rc=%d, isError=%s", rc, isError));
-            if (rc)
+            var rc = getattr(result, "rc", 1);
+            var rows = getattr(result, "rows", null);
+            bool isError = !(rows is List<string>);
+            this.dprint($"rc={rc}, isError={isError}");
+            string err;
+            if (rc!=null)
             {
-                err = result.get("msg") || String.Format("postgres server did not specify an error message for dbexec(%s)", sql);
+                err = getattr(result, "msg", null) as string ?? $"postgres server did not specify an error message for dbexec({sql})";
             }
             else if (isError)
             {
-                err = rows;
+                err = rows.ToString();
             }
             else
             {
                 err = null;
             }
-            if (err)
+            if (err!=null)
             {
                 if (this.debug)
                 {
@@ -635,13 +665,13 @@ namespace tractor.api
                 {
                     // just set the message to a exception if one existed
                     //err = self._shortenTraceback(err)
-                    err = err.ToString().strip();
-                    var errLines = err.split("\n");
-                    err = errLines[-1];
+                    err = err.ToString();//.strip()
+                    var errLines = err.Split('\n');
+                    err = errLines[errLines.Count()-1];
                 }
                 throw new DBExecError(err);
             }
-            return rows;
+            return rows as List<string>;
         }
 
         // Select items from the specified table, using the given natural language where clause.
@@ -663,23 +693,23 @@ namespace tractor.api
             var sql = $"tractorselect('{tableName}', '{whereStr}', '{colStr}', '{sortStr}', {limitStr}, '{archStr}', '{aliasStr}')";
             var rows = this.dbexec(sql);
             return rows;
-            var attrs = new Dictionary<object, object> {
-                    {"q","select"},
-                    {"table",tableName},
-                    {"where",where},
-                    {"columns",colStr},
-                    {"orderby",sortStr},
-                    {"limit",limit.ToString()}
-        };
-            var result = this._transaction(this.MONITOR, attrs);
-            // result is a dictionary with a "rows" entry that is a list of key/value pairs
-            return result;
+//             var attrs = new Dictionary<string, object> {
+//                     {"q","select"},
+//                     {"table",tableName},
+//                     {"where",where},
+//                     {"columns",colStr},
+//                     {"orderby",sortStr},
+//                     {"limit",limit.ToString()}
+//         };
+//             var result = this._transaction(this.MONITOR, attrs);
+//             // result is a dictionary with a "rows" entry that is a list of key/value pairs
+//             return result;
         }
 
         // Set a job's attribute to the specified value.
-        public virtual void _setAttributeJob(object jid, object attribute, object value, Hashtable kwargs)
+        public virtual void _setAttributeJob(object jid, string attribute, object value, Hashtable kwargs = null)
         {
-            var attrs = new Dictionary<object, object> {
+            var attrs = new Dictionary<string, object> {
             {"q","jattr"},
             {"jid",jid},
             {"set_" + attribute,value}
@@ -689,7 +719,7 @@ namespace tractor.api
             {
                 if (_tup_1.Value != null)
                 {
-                    attrs[_tup_1.Key] = _tup_1.Value;
+                    attrs[_tup_1.Key as string] = _tup_1.Value;
                 }
             }
             this._transaction(this.QUEUE, attrs);
@@ -698,24 +728,24 @@ namespace tractor.api
         // Set a command's attribute to the specified value.
         public virtual void _setAttributeCommand(object jid, object cid, object attribute, object value)
         {
-            var attrs = new Dictionary<object, object> {
-            {"q","cattr"},
-            {"jid",jid},
-            {"cid",cid},
-            {"set_" + attribute,value}
-        };
+            var attrs = new Dictionary<string, object> {
+                {"q","cattr"},
+                {"jid",jid},
+                {"cid",cid},
+                {"set_" + attribute,value}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Set a blade's attribute to the specified value.
-        public virtual void _setAttributeBlade(object bladeName, object ipaddr, object attribute, object value)
+        public virtual void _setAttributeBlade(object bladeName, object ipaddr, string attribute, object value)
         {
             var bladeId = $"{bladeName}/{ipaddr}";
-            var attrs = new Dictionary<object, object> {
-              {"q","battribute"},
-             {"b",bladeId},
-              {attribute,value}
-        };
+            var attrs = new Dictionary<string, object> {
+                {"q","battribute"},
+                {"b",bladeId},
+                {attribute,value}
+            };
             this._transaction(this.CONTROL, attrs);
         }
 
@@ -726,164 +756,137 @@ namespace tractor.api
         }
 
         // Set a job's crew list.
-        public virtual object setJobCrews(object jid, object crews)
+        public virtual void setJobCrews(object jid, object crews)
         {
-            this._setAttributeJob(jid, "crews", ",".join(crews));
+            this._setAttributeJob(jid, "crews", string.Join(",", crews));
         }
 
         // Set a job's attribute to the specified value.
-        public virtual object setJobAttribute(object jid, object key, object value)
+        public virtual void setJobAttribute(object jid, string key, object value)
         {
-            if (type(value) == list)
+            if (value is List<object>)
             {
-                value = ",".join((from v in value
-                                  select v.ToString()).ToList());
+                var list = value as List<object>;
+                value = string.Join(",", list.Select(item => item.ToString()).ToList());
             }
             this._setAttributeJob(jid, key, value);
         }
 
         // Pause a job.
-        public virtual object pauseJob(object jid)
+        public virtual void pauseJob(object jid)
         {
             this._setAttributeJob(jid, "pause", 1);
         }
 
         // Unpause a job.
-        public virtual object unpauseJob(object jid)
+        public virtual void unpauseJob(object jid)
         {
             this._setAttributeJob(jid, "pause", 0);
         }
 
         // Lock a job.
-        public virtual object lockJob(object jid, object note = null)
+        public virtual void lockJob(object jid, object note = null)
         {
             // TODO: specify note
-            this._setAttributeJob(jid, "lock", 1, note: note);
+            //this._setAttributeJob(jid, "lock", 1, note: note);
         }
 
         // Unlock a job.
-        public virtual object unlockJob(object jid)
+        public virtual void unlockJob(object jid)
         {
             // TODO: specify unlocking user
             this._setAttributeJob(jid, "lock", 0);
         }
 
         // Interrupt a job.
-        public virtual object interruptJob(object jid)
+        public virtual void interruptJob(object jid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "jinterrupt"},
-                    {
-                        "jid",
-                        jid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","jinterrupt"},
+                    {"jid",jid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Restart a job.
-        public virtual object restartJob(object jid)
+        public virtual void restartJob(object jid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "jrestart"},
-                    {
-                        "jid",
-                        jid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","jrestart"},
+                    {"jid",jid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Retry all active tasks of a job.
-        public virtual object retryAllActiveInJob(object jid)
+        public virtual void retryAllActiveInJob(object jid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "jretry"},
-                    {
-                        "tsubset",
-                        "active"},
-                    {
-                        "jid",
-                        jid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","jretry"},
+                    {"tsubset","active"},
+                    {"jid",jid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Retry all errored tasks of a job.
-        public virtual object retryAllErrorsInJob(object jid)
+        public virtual void retryAllErrorsInJob(object jid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "jretry"},
-                    {
-                        "tsubset",
-                        "error"},
-                    {
-                        "jid",
-                        jid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","jretry"},
+                    {"tsubset","error"},
+                    {"jid",jid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Skip all errored tasks of a job.
-        public virtual object skipAllErrorsInJob(object jid)
+        public virtual void skipAllErrorsInJob(object jid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "tskip"},
-                    {
-                        "tsubset",
-                        "error"},
-                    {
-                        "jid",
-                        jid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","tskip"},
+                    {"tsubset","error"},
+                    {"jid",jid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Set delay time of a job.
-        public virtual object delayJob(object jid, object delayTime)
+        public virtual void delayJob(string jid, object delayTime)
         {
             this.setJobAttribute(jid, "afterTime", delayTime.ToString());
         }
 
         // Clear delay time of a job.
-        public virtual object undelayJob(object jid)
+        public virtual void undelayJob(object jid)
         {
             this.setJobAttribute(jid, "afterTime", "0");
         }
 
         // Delete a job.
-        public virtual object deleteJob(object jid)
+        public virtual void deleteJob(object jid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "jretire"},
-                    {
-                        "jid",
-                        jid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","jretire"},
+                    {"jid",jid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Un-delete a job.
-        public virtual object undeleteJob(object jid)
+        public virtual void undeleteJob(object jid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "jrestore"},
-                    {
-                        "jid",
-                        jid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","jrestore"},
+                    {"jid",jid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Fetch SQL dump of job.
-        public virtual object getJobDump(object jid, object fmt = "JSON")
+        public virtual string getJobDump(int jid, string fmt = "JSON")
         {
-            var result = this.dbexec(String.Format("TractorJobDump(%d, '%s')", jid, fmt));
+            var result = this.dbexec($"TractorJobDump({jid}, '{fmt}')");
             if (result.Count > 0)
             {
                 return result[0];
@@ -895,79 +898,57 @@ namespace tractor.api
         }
 
         // Retry a task.
-        public virtual object retryTask(object jid, object tid)
+        public virtual void retryTask(object jid, object tid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "tretry"},
-                    {
-                        "jid",
-                        jid},
-                    {
-                        "tid",
-                        tid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","tretry"},
+                    {"jid",jid},
+                    {"tid",tid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Resume a task.
-        public virtual object resumeTask(object jid, object tid)
+        public virtual void resumeTask(object jid, object tid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "tretry"},
-                    {
-                        "recover",
-                        1},
-                    {
-                        "jid",
-                        jid},
-                    {
-                        "tid",
-                        tid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","tretry"},
+                    {"recover",1},
+                    {"jid",jid},
+                    {"tid",tid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Kill a task.
-        public virtual object killTask(object jid, object tid)
+        public virtual void killTask(string jid, object tid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "jinterrupt"},
-                    {
-                        "jid",
-                        jid},
-                    {
-                        "tid",
-                        tid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","jinterrupt"},
+                    {"jid",jid},
+                    {"tid",tid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Skip a task.
-        public virtual object skipTask(object jid, object tid)
+        public virtual void skipTask(string jid, object tid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "tskip"},
-                    {
-                        "jid",
-                        jid},
-                    {
-                        "tid",
-                        tid}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","tskip"},
+                    {"jid",jid},
+                    { "tid",tid}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Set a command's attribute to the specified value.
-        public virtual object setCommandAttribute(object jid, object cid, object key, object value)
+        public virtual void setCommandAttribute(object jid, object cid, object key, object value)
         {
-            if (type(value) == list)
+            if (value is List<object>)
             {
-                value = ",".join((from v in value
-                                  select v.ToString()).ToList());
+                var list = value as List<object>;
+                value = string.Join(",", list.Select(item=>item.ToString()).ToList());
             }
             this._setAttributeCommand(jid, cid, key, value);
         }
@@ -975,23 +956,17 @@ namespace tractor.api
         // Return the command details for a task.
         public virtual object getTaskCommands(object jid, object tid)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "taskdetails"},
-                    {
-                        "jid",
-                        jid},
-                    {
-                        "tid",
-                        tid}};
-            var result = this._transaction(this.MONITOR, attrs);
-            if (!result.Contains("cmds"))
+            var attrs = new Dictionary<string, object> {
+                    {"q","taskdetails"},
+                    {"jid",jid},
+                    {"tid",tid}};
+            var result = this._transaction(this.MONITOR, attrs) as Dictionary<string , object>;
+            if (!result.ContainsKey("cmds"))
             {
-                return;
+                return null;
             }
             var lines = new List<object>();
-            var cmds = result["cmds"];
+            var cmds = result["cmds"] as List<object>;
             // formats = [
             //     Formats.IntegerFormat("cid", width=4),
             //     Formats.StringFormat("state", width=8),
@@ -1003,7 +978,7 @@ namespace tractor.api
             //     Formats.ListFormat("argv", header="command")
             //     ]
             // cmdFormatter = Formats.Formatter(formats)
-            var headings = new List<object> {
+            var headings = new List<string> {
                     "cid",
                     "state",
                     "service",
@@ -1013,115 +988,101 @@ namespace tractor.api
                     "stop",
                     "argv"
                 };
-            lines.append(" ".join(headings));
-            lines.append(" ".join((from heading in headings
-                                   select ("=" * heading.Count)).ToList()));
+            lines.Add(string.Join(" ", headings));
+            lines.Add(string.Join(" ", headings.Select(h => new string('=', h.Count()).ToList())));
             foreach (var cmd in cmds)
             {
-                var cmdObj = DictObj(cmd);
-                var line = "{cid} {state} {service} {tags} {type} {t0} {t1} {argv}".format(cid: cmdObj.cid, state: cmdObj.state, service: cmdObj.service, tags: cmdObj.tags, type: cmdObj.type, t0: cmdObj.t0, t1: cmdObj.t1, argv: cmdObj.argv);
-                lines.append(line);
+                var cmdObj = cmd as Dictionary<string, object>;// DictObj(cmd);
+                var line = $"{cmdObj["cid"]} {cmdObj["stat"]} {cmdObj["service"]} {cmdObj["tags"]} {cmdObj["type"]} {cmdObj["t0"]} {cmdObj["t1"]} {cmdObj["argv"]}";
+                lines.Add(line);
             }
-            return "\n".join(lines);
+            return string.Join("\n",lines);
         }
 
         // Return the command logs for a task.
         public virtual object getTaskLog(object jid, object tid, object owner = null)
         {
-            object fullURI;
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "tasklogs"},
-                    {
-                        "jid",
-                        jid},
-                    {
-                        "tid",
-                        tid}};
-            if (owner)
+            
+            var attrs = new Dictionary<string, object> {
+                    {"q","tasklogs"},
+                    {"jid",jid},
+                    {"tid",tid}
+            };
+            if (owner!=null)
             {
                 attrs["owner"] = owner;
             }
-            var logInfo = this._transaction(this.MONITOR, attrs);
-            var logLines = new List<object>();
-            if (!logInfo.Contains("LoggingRedirect"))
+            var logInfo = this._transaction(this.MONITOR, attrs) as Dictionary<string, object>;
+            var logLines = new List<string>();
+            if (!logInfo.ContainsKey("LoggingRedirect"))
             {
                 return "";
             }
-            var logURIs = logInfo["LoggingRedirect"];
+            var logURIs = logInfo["LoggingRedirect"] as List<string>;
+
             foreach (var logURI in logURIs)
             {
-                if (logURI.startswith("http://"))
+                string fullURI;
+                if (logURI.StartsWith("http://"))
                 {
                     fullURI = logURI;
                 }
                 else
                 {
-                    fullURI = String.Format("http://%s:%s%s", this.hostname, this.port, logURI);
+                    fullURI = $"http://{this.hostname}:{this.port}{logURI}";
                 }
                 // fetch the log
+                string logResult = null;
                 try
                 {
-                    var f = urllib2.urlopen(fullURI);
+                    logResult = trutil.readUrl(fullURI);
                 }
-                catch (Exception)
+                catch (Exception err)
                 {
-                    var logResult = String.Format("Exception received in EngineClient while fetching log: %s", err.ToString());
+                    logResult = String.Format("Exception received in EngineClient while fetching log: %s", err.Message);
                 }
-                logLines.append(logResult.decode("utf-8"));
+                logLines.Add(logResult);// .decode("utf-8"));
             }
-            return "".join(logLines);
+            return string.Join("",logLines);
         }
 
         // Return the job description in JSON format.
-        public virtual object fetchJobsAsJSON(object filterName = null)
+        public virtual object fetchJobsAsJSON(string filterName = null)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "jobs"}};
-            if (filterName)
+            var attrs = new Dictionary<string, object> {
+                    {"q","jobs"}
+            };
+            if (filterName != null)
             {
                 // this additional level of escaping is for file-naming safety when the filter is stored in the file system
                 // arguably such safety should happen on the server, not the client
-                attrs["filter"] = urllib2.quote(filterName + ".joblist");
+                attrs["filter"] = System.Web.HttpUtility.UrlEncode(filterName + ".joblist");
             }
             var jobInfo = this._transaction(this.MONITOR, attrs);
             return jobInfo;
         }
 
         // Return the job information in JSON format.
-        public virtual object fetchJobDetails(object jid, object graph = true, object notes = true)
+        public virtual object fetchJobDetails(object jid, bool graph = true, bool notes = true)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "jobdetails"},
-                    {
-                        "jid",
-                        jid},
-                    {
-                        "graph",
-                        Convert.ToInt32(graph)},
-                    {
-                        "notes",
-                        Convert.ToInt32(notes)},
-                    {
-                        "flat",
-                        1}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","jobdetails"},
+                    {"jid",jid},
+                    {"graph",Convert.ToInt32(graph)},
+                    {"notes",Convert.ToInt32(notes)},
+                    {"flat",1}
+            };
             var jobDetails = this._transaction(this.MONITOR, attrs);
             return jobDetails;
         }
 
         // Return the status of all blades in JSON format.
-        public virtual object fetchBladesAsJSON(object filterName = null)
+        public virtual object fetchBladesAsJSON(string filterName = null)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "blades"}};
-            if (filterName)
+            var attrs = new Dictionary<string, object> {
+                    {"q","blades"}
+            };
+            if (filterName != null)
             {
                 attrs["filter"] = filterName + ".bladelist";
             }
@@ -1130,13 +1091,13 @@ namespace tractor.api
         }
 
         // Nimby a bade.
-        public virtual object nimbyBlade(object bladeName, object ipaddr, object allow = null)
+        public virtual void nimbyBlade(string bladeName, object ipaddr, object allow = null)
         {
-            this._setAttributeBlade(bladeName, ipaddr, "nimby", allow || 1);
+            this._setAttributeBlade(bladeName, ipaddr, "nimby", allow ?? 1);
         }
 
         // Unnimby a bade.
-        public virtual object unnimbyBlade(object bladeName, object ipaddr)
+        public virtual void unnimbyBlade(object bladeName, object ipaddr)
         {
             this._setAttributeBlade(bladeName, ipaddr, "nimby", 0);
         }
@@ -1145,162 +1106,138 @@ namespace tractor.api
         public virtual object traceBlade(object bladeName, object ipaddr)
         {
             var bladeId = String.Format("%s/%s", bladeName, ipaddr);
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "tracer"},
-                    {
-                        "t",
-                        bladeId},
-                    {
-                        "fmt",
-                        "plain"}};
-            var trace = this._transaction(this.CONTROL, attrs, translation: null) || "";
+            var attrs = new Dictionary<string, object> {
+                    {"q","tracer"},
+                    {"t",bladeId},
+                    {"fmt","plain"}
+            };
+            var trace = this._transaction(this.CONTROL, attrs, translation: null) ?? "";
             return trace;
         }
 
         // Retry active tasks on a blade.
-        public virtual object ejectBlade(object bladeName, object ipaddr)
+        public virtual void ejectBlade(object bladeName, object ipaddr)
         {
             var bladeId = String.Format("%s/%s", bladeName, ipaddr);
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "ejectall"},
-                    {
-                        "blade",
-                        bladeId}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","ejectall"},
+                    {"blade",bladeId}
+            };
             this._transaction(this.QUEUE, attrs);
         }
 
         // Remove blade entry from database.
-        public virtual object delistBlade(object bladeName, object ipaddr)
+        public virtual void delistBlade(object bladeName, object ipaddr)
         {
             var bladeId = String.Format("%s/%s", bladeName, ipaddr);
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "delist"},
-                    {
-                        "id",
-                        bladeId}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","delist"},
+                    {"id",bladeId}
+            };
             this._transaction(this.BTRACK, attrs);
         }
 
         // Cause the engine the reload the limits.config file.
-        public virtual object reloadLimitsConfig()
+        public virtual void reloadLimitsConfig()
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "reconfigure"},
-                    {
-                        "file",
-                        this.LIMITS_CONFIG_FILENAME}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","reconfigure"},
+                    {"file",this.LIMITS_CONFIG_FILENAME}
+            };
             this._transaction(this.CONTROL, attrs);
         }
 
         // Cause the engine the reload the crews.config file.
-        public virtual object reloadCrewsConfig()
+        public virtual void reloadCrewsConfig()
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "reconfigure"},
-                    {
-                        "file",
-                        this.CREWS_CONFIG_FILENAME}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","reconfigure"},
+                    {"file",this.CREWS_CONFIG_FILENAME}
+            };
             this._transaction(this.CONTROL, attrs);
         }
 
         // Cause the engine the reload the blade.config file.
-        public virtual object reloadBladeConfig()
+        public virtual void reloadBladeConfig()
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "reconfigure"},
-                    {
-                        "file",
-                        this.BLADE_CONFIG_FILENAME}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","reconfigure"},
+                    {"file",this.BLADE_CONFIG_FILENAME}
+            };
             this._transaction(this.CONTROL, attrs);
         }
 
         // Cause the engine the reload the tractor.config file.
-        public virtual object reloadTractorConfig()
+        public virtual void reloadTractorConfig()
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "reconfigure"},
-                    {
-                        "file",
-                        this.TRACTOR_CONFIG_FILENAME}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","reconfigure"},
+                    {"file",this.TRACTOR_CONFIG_FILENAME}
+            };
             this._transaction(this.CONTROL, attrs);
         }
 
         // Cause the engine the reload all config files.
-        public virtual object reloadAllConfigs()
+        public virtual void reloadAllConfigs()
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "reconfigure"}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","reconfigure"}
+            };
             this._transaction(this.CONTROL, attrs);
         }
 
         // Return the engine's current queue statistics.
         public virtual object queueStats()
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "status"},
-                    {
-                        "qlen",
-                        "1"},
-                    {
-                        "enumq",
-                        "1"}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","status"},
+                    {"qlen","1"},
+                    {"enumq","1"}
+            };
             return this._transaction(this.CONTROL, attrs);
         }
 
         // Perform simple communication with engine to verify the session is valid.
         public virtual object ping()
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "status"}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","status"}
+            };
             return this._transaction(this.CONTROL, attrs);
         }
 
         // Signal engine to reestablish its connections with its database server.
         public virtual object dbReconnect()
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "dbreconnect"}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","dbreconnect"}
+            };
             return this._transaction(this.CONTROL, attrs);
         }
 
         // Request next command to run from engine.  Would be used by a remote execution server like tractor-blade.
-        public virtual object nextCmd(bool probe = false, Hashtable argv = null)
+        public virtual object nextCmd(bool probe = false, Dictionary<string, object> argv = null)
         {
-            var attrs = new Hashtable {
-             {"q","nextcmd"}
-        };
+            var attrs = new Dictionary<string, object> {
+                { "q", "nextcmd" }
+            };
             if (probe)
             {
                 attrs["onlyprobe"] = 1;
             }
-            attrs.u(argv);
+            if (argv != null)
+            {
+                foreach(var k in argv.Keys)
+                {
+                    attrs[k] = argv[k];
+                }
+            }
             try
             {
                 var result = this._transaction(this.TASK, attrs);
+                return result;
             }
-            catch (TransactionError)
+            catch (TransactionError err)
             {
                 var msg = err.ToString();
                 if (msg.Contains("error 404:") || msg.Contains("job queue is empty") || msg.Contains("no dispatchable tasks") || msg.Contains("no remaining queueable commands"))
@@ -1312,19 +1249,14 @@ namespace tractor.api
                     throw;
                 }
             }
-            return result;
         }
 
         // Retrieve a specified config file. e.g. getConfig("blade.config")
         public virtual object getConfig(object filename)
         {
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "q",
-                        "get"},
-                    {
-                        "file",
-                        filename}};
+            var attrs = new Dictionary<string, object> {
+                    {"q","get"},
+                    {"file",filename}};
             return this._transaction(this.CONFIG, attrs);
         }
 
@@ -1338,26 +1270,16 @@ namespace tractor.api
             bool skipLogin = false,
             bool block = false)
         {
-            hostname = hostname || trutil.getlocalhost();
-            owner = owner || this.user || getpass.getuser();
-            var cwd = os.path.abspath(os.getcwd()).replace("\\", "/");
-            filename = filename || "no filename specified";
-            var attrs = new Dictionary<object, object> {
-                    {
-                        "spvers",
-                        this.SPOOL_VERSION},
-                    {
-                        "hnm",
-                        hostname},
-                    {
-                        "jobOwner",
-                        owner},
-                    {
-                        "jobFile",
-                        filename},
-                    {
-                        "cwd",
-                        cwd}};
+            hostname = hostname ?? trutil.getlocalhost();
+            owner = owner ?? this.user;//|| getpass.getuser();
+            var cwd = System.IO.Directory.GetCurrentDirectory().Replace("\\", "/");
+            filename = filename ?? "no filename specified";
+            var attrs = new Dictionary<string, object> {
+                    {"spvers",this.SPOOL_VERSION},
+                    {"hnm",hostname},
+                    {"jobOwner",owner},
+                    {"jobFile",filename},
+                    {"cwd",cwd}};
             if (block)
             {
                 attrs["blocking"] = "spool";
@@ -1367,24 +1289,23 @@ namespace tractor.api
             {
                 contentType += "-json";
             }
-            var headers = new Dictionary<object, object> {
-                    {
-                        "Content-Type",
-                        contentType}};
+            var headers = new Dictionary<string, object> {
+                    {"Content-Type",contentType}
+            };
             return this._transaction(this.SPOOL, attrs, payload: jobData, translation: null, headers: headers, skipLogin: skipLogin);
         }
 
         // Close the connection with the engine by logging out and invalidating the session id.
-        public virtual object close()
+        public virtual void close()
         {
-            if (!this.tsid)
+            if (this.tsid == null)
             {
                 // if there's no session id, then there's nothing to close
                 this.dprint("no session id established.  connection considered closed.");
                 return;
             }
             this.dprint("close engine connection");
-            var attrs = new Dictionary<object, object> {
+            var attrs = new Dictionary<string, object> {
                     {
                         "q",
                         "logout"},

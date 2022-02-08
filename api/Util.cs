@@ -4,14 +4,44 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Net;
+using System.IO;
 
 namespace tractor.api
 {
     public static class trutil
     {
-        public static object _localhost = null;
+        public static string _localhost = null;
 
-        public static object getlocalhost()
+        public static Dictionary<string, object> MergeDictData(Dictionary<string, object> data, Dictionary<string, object> update)
+        {
+            var ret = new Dictionary<string, object>();
+            foreach(var k in data.Keys)
+            {
+                ret[k] = data[k];
+            }
+            foreach(var k in update.Keys)
+            {
+                ret[k] = data[k];
+            }
+            return ret;
+        }
+
+        public static string readUrl(string url)
+        {
+            WebClient client = new WebClient();
+            // Add a user agent header in case the 
+            // requested URI contains a query.
+            client.Headers.Add("user-agent", "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.2; .NET CLR 1.0.3705;)");
+            Stream data = client.OpenRead(url);
+            StreamReader reader = new StreamReader(data);
+            string s = reader.ReadToEnd();
+            Console.WriteLine(s);
+            data.Close();
+            reader.Close();
+            return s;
+        }
+
+        public static string getlocalhost()
         {
             if (_localhost == null)
             {
